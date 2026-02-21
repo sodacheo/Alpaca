@@ -9,6 +9,28 @@ import os, datetime, threading, sys, base64, logging, re, tempfile
 from ..sql_manager import prettify_model_name, generate_uuid, format_datetime, Instance as SQL
 from . import attachments, blocks, dialog, voice, tools, models, chat, activities
 
+def check_for_sensitive_data(text: str) -> dict:
+    """
+    Erkennung von sensiblen Daten in einem Text.
+
+    Args:
+        text (str): Der zu überprüfende Text.
+
+    Returns:
+        dict: Ein Dictionary mit den gefundenen sensiblen Daten und ihren Typen.
+    """
+    patterns = {
+        "email": r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
+        "age": r"\b\d{1,3} (Jahre|years)\b",
+        "location": r"\b[A-Z][a-z]+(straße|strasse|platz)\b",
+        "phone": r"\b[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}\b"
+    }
+    found = {}
+    for key, pattern in patterns.items():
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        if matches:
+            found[key] = matches
+    return found
 
 logger = logging.getLogger(__name__)
 
@@ -395,10 +417,15 @@ class Message(Gtk.Box):
     def save(self, force_content:str=""):
         chat_element = self.get_ancestor(chat.Chat)
         if chat_element and chat_element.chat_id:
-            SQL.insert_or_update_message(
-                self,
-                force_content=force_content
-            )
+            content = force_content if force_content else self.get_content()
+            SQL.insert_or_update_message(self, force_content=force_content)
+
+        # Erkennung sensibler Daten
+        sensitive_data = check_for_sensitive_data(content)
+        if sensitive_data:
+            for data_type, values in sensitive_data.items():
+                for value in values:
+                    SQL.log_sensitive_data(chat_element.chat_id, data_type, value)
 
 @Gtk.Template(resource_path='/com/jeffser/Alpaca/widgets/message/global_message_textview.ui')
 class GlobalMessageTextView(GtkSource.View):

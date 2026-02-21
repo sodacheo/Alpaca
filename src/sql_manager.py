@@ -210,6 +210,12 @@ class Instance:
                     "name": "TEXT NOT NULL",
                     "color": "TEXT",
                     "parent": "TEXT"
+                },
+                "sensitive_data": {
+                    "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+                    "chat_id": "TEXT NOT NULL",
+                    "type": "TEXT NOT NULL",
+                    "value": "TEXT NOT NULL"
                 }
             }
 
@@ -391,6 +397,14 @@ class Instance:
                         "INSERT INTO chat (id, name, folder, is_template) VALUES (?, ?, ?, 0)",
                         (chat.chat_id, chat.get_name(), chat.folder_id),
                     )
+
+    def log_sensitive_data(self, chat_id: str, data_type: str, value: str):
+        with SQLiteConnection() as c:
+            c.cursor.execute(
+                "INSERT INTO sensitive_data (chat_id, type, value) VALUES (?, ?, ?)",
+                (chat_id, data_type, value)
+        )
+
 
     def delete_chat(chat) -> None:
         with SQLiteConnection() as c:
