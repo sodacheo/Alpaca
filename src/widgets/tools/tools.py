@@ -92,15 +92,15 @@ class WebSearch(Base):
         self.result = 0 # 0=loading | "TEXT"=ok | None=error |
         search_term = arguments.get("search_term", "").strip()
         if not search_term:
-            return "I could not find any results", "Error: Search term was not provided"
+            return "Error: Search term was not provided"
 
         GLib.idle_add(self.start_work, search_term, bot_message)
         while self.result == 0:
             continue
 
         if self.result:
-            return None, self.result
-        return "I could not find any results", 'An error occurred'
+            return self.result
+        return "Error: No results found"
 
 class Terminal(Base):
     display_name:str = _('Terminal')
@@ -126,36 +126,69 @@ class Terminal(Base):
     required_libraries:list = ['gi.repository.Vte']
 
     global_page = None
-    current_commands = []
 
-    def run(self, arguments, messages, bot_message) -> tuple:
+    def run(self, arguments, messages, bot_message) -> str:
         if not arguments.get('command'):
-            return "I could not figure out what you want me to run", "Error: No command was provided"
+            return "Error: No command was provided"
 
-        self.current_commands = [
-            'clear',
-            'echo -e "🦙 {}" | fold -s -w "$(tput cols)"'.format(arguments.get('explanation'), _('No explanation was provided')),
-            'read -e -i "{}" cmd'.format(arguments.get('command').replace('"', '\\"')),
-            'clear',
-            'eval "$cmd"'
-        ]
+        self.waiting_confirmation = True
+        self.current_command = ""
+
+        def dialog_confirmation(cmd:str, confirmation:bool):
+            self.current_command = cmd if confirmation else ""
+            self.waiting_confirmation = False
+
+        options = {
+            _('Cancel'): {
+                'callback': lambda cmd: dialog_confirmation(cmd, False)
+            },
+            _('Run'): {
+                'appearance': 'suggested',
+                'callback': lambda cmd: dialog_confirmation(cmd, True),
+                'default': True
+            }
+        }
+        entry_dialog = dialog.Entry(
+            heading=_("Command Execution"),
+            body=arguments.get('explanation'),
+            close_response=list(options.keys())[0],
+            options=options,
+            entries={
+                'placeholder': _("Command"),
+                'css': ['black_background'],
+                'text': arguments.get('command')
+            }
+        )
+        GLib.idle_add(entry_dialog.show, bot_message.get_root())
+
+        while self.waiting_confirmation:
+            continue
+
+        if not self.current_command:
+            return 'The user chose not to execute the command'
+
+        self.waiting_confirmation = True
 
         if not self.global_page or not self.global_page.get_root():
             self.global_page = activities.Terminal(
                 language='auto',
-                code_getter=lambda: ';'.join(self.current_commands),
-                close_callback=lambda: setattr(self, 'waiting_terminal', False)
+                code_getter=lambda: ';'.join(['clear', self.current_command]),
+                close_callback=lambda: setattr(self, 'waiting_confirmation', False)
             )
             chat_element = bot_message.get_ancestor(chat.Chat)
             GLib.idle_add(activities.show_activity, self.global_page, bot_message.get_root(), not chat_element or not chat_element.chat_id)
 
-        self.waiting_terminal = True
         self.global_page.run()
 
-        while self.waiting_terminal:
+        while self.waiting_confirmation:
             continue
 
-        return "I ran the command successfully!", '```\n{}\n```'.format(self.global_page.get_text())
+        result_text = self.global_page.get_text().strip('\n').split('\n')[:-1]
+
+        if len(result_text) == 0:
+            return "The command did not return any text"
+
+        return '```\n{}\n```'.format('\n'.join(result_text))
 
 class BackgroundRemover(Base):
     display_name:str = _('Background Remover')
@@ -230,9 +263,9 @@ class BackgroundRemover(Base):
                 continue
 
             if self.status == 1:
-                return "Background removed successfully!", "Successful"
+                return "Background removed successfully"
             else:
-                return "Sorry, an error occurred", "An error occurred"
+                return "An error occurred"
         else:
-            return "Please provide an image and try again!", "Error: User didn't attach an image"
-        return "Sorry, an error occurred", "Error: Couldn't remove the background"
+            return "Error: User didn't attach an image"
+        return "Error: Couldn't remove the background"
